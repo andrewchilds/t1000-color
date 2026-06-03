@@ -39,23 +39,32 @@
 #define ALERT_HIGH        2
 
 // Chart configuration
-#define CHART_MAX_POINTS  24  // 120 minutes / 5 minutes = 24 points
+#define CHART_MAX_POINTS  26  // 130 minutes / 5 minutes = 26 points
 #define CHART_DOT_SPACING 8   // Pixels between dots (scaled for 200px width)
 #define CHART_Y_MIN       40
 #define CHART_Y_MAX       300
-#define CHART_DOT_RADIUS  3
+#define CHART_DOT_RADIUS  4
 
 // Display layout constants for Pebble Time 2 (200x228)
-#define SCREEN_WIDTH      200
-#define SCREEN_HEIGHT     228
+#define SCREEN_WIDTH       200
+#define SCREEN_HEIGHT      228
+#define TIME_ROW_Y         0
+#define DIVIDER_Y          44
+#define CGM_ROW_Y          52
+#define CGM_DELTA_Y_OFFSET 9
+#define CHART_Y            108
+#define CHART_HEIGHT       95
+#define BOTTOM_ROW_Y       196
 
 // Window and layers
 static Window *s_main_window;
 static Layer *s_chart_layer;
+static Layer *s_divider_layer;
 static Layer *s_battery_layer;
 static Layer *s_sync_layer;
 static Layer *s_alert_layer;
-static TextLayer *s_time_date_layer;
+static TextLayer *s_time_layer;
+static TextLayer *s_date_layer;
 static TextLayer *s_cgm_value_layer;
 static TextLayer *s_delta_layer;
 static TextLayer *s_time_ago_layer;
@@ -95,7 +104,8 @@ static const uint32_t TREND_ICONS_BLACK[] = {
 };
 
 // Text buffers
-static char s_time_date_buffer[24];
+static char s_time_buffer[12];
+static char s_date_buffer[12];
 static char s_cgm_value_buffer[8];
 static char s_delta_buffer[12];
 static char s_time_ago_buffer[16];
@@ -174,7 +184,8 @@ static void apply_colors() {
     window_set_background_color(s_main_window, bg_color);
 
     // Update text layer colors
-    text_layer_set_text_color(s_time_date_layer, fg_color);
+    text_layer_set_text_color(s_time_layer, fg_color);
+    text_layer_set_text_color(s_date_layer, fg_color);
     text_layer_set_text_color(s_cgm_value_layer, fg_color);
     text_layer_set_text_color(s_delta_layer, fg_color);
     text_layer_set_text_color(s_time_ago_layer, fg_color);
@@ -690,14 +701,25 @@ static void parse_meal_data(const char *meal_data) {
 #ifdef PBL_COLOR
 static GColor get_glucose_color(int value) {
     if (value <= s_low_threshold) {
-        return GColorRed;
+        return GColorSunsetOrange;  // Light red for low
     } else if (value >= s_high_threshold) {
-        return GColorOrange;
+        return GColorPastelYellow;  // Light yellow for high
     } else {
-        return GColorGreen;
+        return GColorWhite;  // White for in-range
     }
 }
 #endif
+
+/**
+ * Draw the horizontal divider line with 50% dot pattern
+ */
+static void divider_layer_update_proc(Layer *layer, GContext *ctx) {
+    GRect bounds = layer_get_bounds(layer);
+    graphics_context_set_stroke_color(ctx, GColorLightGray);
+    for (int x = 0; x < bounds.size.w; x += 2) {
+        graphics_draw_pixel(ctx, GPoint(x, 0));
+    }
+}
 
 /**
  * Draw the CGM dot chart
@@ -727,27 +749,52 @@ static void chart_layer_update_proc(Layer *layer, GContext *ctx) {
     int high_y = bounds.origin.y + margin + chart_height -
                  ((s_high_threshold - CHART_Y_MIN) * chart_height / (CHART_Y_MAX - CHART_Y_MIN));
 
-    // Draw dashed threshold lines
+    // Draw colored background zones (full width, from x=0 to right edge)
+    int chart_left = bounds.origin.x + margin;
+    int chart_right = bounds.origin.x + bounds.size.w - margin;
+    int chart_top = bounds.origin.y + margin;
+    int chart_bottom = bounds.origin.y + margin + chart_height;
+    int full_width = bounds.size.w;
+
+#ifdef PBL_COLOR
+    int fill_width = full_width - 2;  // End 2px from right edge
+
+    // Dark red zone: 40 (min) to low threshold
+    graphics_context_set_fill_color(ctx, GColorDarkCandyAppleRed);
+    graphics_fill_rect(ctx, GRect(0, low_y, fill_width, chart_bottom - low_y), 0, GCornerNone);
+
+    // Dark green zone: low threshold to high threshold (in-range)
+    graphics_context_set_fill_color(ctx, GColorDarkGreen);
+    graphics_fill_rect(ctx, GRect(0, high_y, fill_width, low_y - high_y), 0, GCornerNone);
+
+    // Dark yellow zone: high threshold to max
+    graphics_context_set_fill_color(ctx, GColorArmyGreen);  // Dark yellow/olive
+    graphics_fill_rect(ctx, GRect(0, chart_top, fill_width, high_y - chart_top), 0, GCornerNone);
+
+    // 50% black dot pattern overlay (checkerboard)
+    graphics_context_set_fill_color(ctx, GColorBlack);
+    for (int y = chart_top; y < chart_bottom; y++) {
+        for (int x = (y % 2); x < fill_width; x += 2) {
+            graphics_draw_pixel(ctx, GPoint(x, y));
+        }
+    }
+
+    // Black dividing lines between zones
+    graphics_context_set_stroke_color(ctx, GColorBlack);
+    graphics_draw_line(ctx, GPoint(0, low_y), GPoint(fill_width, low_y));
+    graphics_draw_line(ctx, GPoint(0, high_y), GPoint(fill_width, high_y));
+#else
+    // Monochrome platforms: draw dashed threshold lines instead
     int dash_length = 4;
     int gap_length = 3;
-    for (int x = bounds.origin.x + margin; x < bounds.origin.x + bounds.size.w - margin; x += dash_length + gap_length) {
+    graphics_context_set_stroke_color(ctx, fg_color);
+    for (int x = chart_left; x < chart_right; x += dash_length + gap_length) {
         int end_x = x + dash_length - 1;
-        if (end_x > bounds.origin.x + bounds.size.w - margin) {
-            end_x = bounds.origin.x + bounds.size.w - margin;
-        }
-#ifdef PBL_COLOR
-        // Color platforms: red for low threshold, orange for high threshold
-        graphics_context_set_stroke_color(ctx, GColorRed);
-        graphics_draw_line(ctx, GPoint(x, low_y), GPoint(end_x, low_y));
-        graphics_context_set_stroke_color(ctx, GColorOrange);
-        graphics_draw_line(ctx, GPoint(x, high_y), GPoint(end_x, high_y));
-#else
-        // Monochrome platforms: use foreground color for both
-        graphics_context_set_stroke_color(ctx, fg_color);
+        if (end_x > chart_right) end_x = chart_right;
         graphics_draw_line(ctx, GPoint(x, low_y), GPoint(end_x, low_y));
         graphics_draw_line(ctx, GPoint(x, high_y), GPoint(end_x, high_y));
-#endif
     }
+#endif
 
     // Draw dots for each data point
     // Data comes in most-recent-first, so we plot right-to-left
@@ -773,12 +820,7 @@ static void chart_layer_update_proc(Layer *layer, GContext *ctx) {
         // pixels_per_minute = CHART_DOT_SPACING / 5
         int total_minutes_ago = s_chart_minutes_ago[i] + elapsed_minutes;
         int pixel_offset = (total_minutes_ago * CHART_DOT_SPACING) / 5;
-        int x = bounds.origin.x + bounds.size.w - margin - pixel_offset;
-
-        // Skip points that have scrolled off the left edge
-        if (x < bounds.origin.x + margin) {
-            continue;
-        }
+        int x = bounds.origin.x + bounds.size.w - margin - 2 - pixel_offset;
 
         // Calculate Y position (invert because screen Y increases downward)
         int y = bounds.origin.y + margin + chart_height -
@@ -808,13 +850,13 @@ static void chart_layer_update_proc(Layer *layer, GContext *ctx) {
 
         // Calculate X position (same as CGM dots)
         int pixel_offset = (total_minutes_ago * CHART_DOT_SPACING) / 5;
-        int meal_x = bounds.origin.x + bounds.size.w - margin - pixel_offset;
+        int meal_x = bounds.origin.x + bounds.size.w - margin - 2 - pixel_offset;
         int text_y_offset = -6;
 
         // For future meals (within next 20 minutes), position at right edge
         // Shift left to leave room for right-pointing arrow
         if (is_future) {
-            meal_x = bounds.origin.x + bounds.size.w - margin - 10;
+            meal_x = bounds.origin.x + bounds.size.w - margin - 12;
         }
 
         // Skip meals that have scrolled off the left edge
@@ -1009,14 +1051,17 @@ static void update_trend_icon(uint8_t trend) {
  * Hides delta for LOW/HIGH values since there's no room
  */
 static void update_layout_for_cgm_text(const char *cgm_text) {
-    int cgmValueYPos = 30;
+
+    // Show CGM value and trend layers (hidden on startup until data arrives)
+    layer_set_hidden(text_layer_get_layer(s_cgm_value_layer), false);
+    layer_set_hidden(bitmap_layer_get_layer(s_trend_layer), false);
 
     // Check if this is a LOW or HIGH value - hide delta in these cases
     bool hide_delta = (strcmp(cgm_text, "LOW") == 0 || strcmp(cgm_text, "HIGH") == 0);
     layer_set_hidden(text_layer_get_layer(s_delta_layer), hide_delta);
 
     // Get the actual rendered width of the CGM text
-    GSize text_size = graphics_text_layout_get_content_size(
+    GSize cgm_size = graphics_text_layout_get_content_size(
         cgm_text,
         fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
         GRect(0, 0, 140, 52),
@@ -1024,15 +1069,43 @@ static void update_layout_for_cgm_text(const char *cgm_text) {
         GTextAlignmentLeft
     );
 
-    // Position trend arrow just after the CGM text
-    // 6 is CGM layer x offset, add small gap after text
-    int trend_x = 6 + text_size.w + 3;
-    int delta_x = trend_x + 32;
+    // Get delta text width if visible
+    int delta_width = 0;
+    if (!hide_delta) {
+        GSize delta_size = graphics_text_layout_get_content_size(
+            s_delta_buffer,
+            fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+            GRect(0, 0, 60, 32),
+            GTextOverflowModeTrailingEllipsis,
+            GTextAlignmentLeft
+        );
+        delta_width = delta_size.w;
+    }
 
+    // Calculate total width: CGM + gap + trend(30) + gap + delta
+    int gap = 5;
+    int trend_width = 30;
+    int total_width = cgm_size.w + gap + trend_width;
+    if (!hide_delta) {
+        total_width += gap + delta_width;
+    }
+
+    // Center the entire row (offset -5 to compensate for visual imbalance)
+    int start_x = (SCREEN_WIDTH - total_width) / 2 - 5;
+
+    // Position CGM value layer
+    layer_set_frame(text_layer_get_layer(s_cgm_value_layer),
+                    GRect(start_x, CGM_ROW_Y, 140, 52));
+
+    // Position trend arrow after CGM text
+    int trend_x = start_x + cgm_size.w + gap;
     layer_set_frame(bitmap_layer_get_layer(s_trend_layer),
-                    GRect(trend_x, cgmValueYPos + 15, 30, 30));
+                    GRect(trend_x, CGM_ROW_Y + 15, 30, 30));
+
+    // Position delta after trend
+    int delta_x = trend_x + trend_width + gap;
     layer_set_frame(text_layer_get_layer(s_delta_layer),
-                    GRect(delta_x, cgmValueYPos + 12, 54, 28));
+                    GRect(delta_x, CGM_ROW_Y + CGM_DELTA_Y_OFFSET, 60, 32));
 }
 
 /**
@@ -1093,13 +1166,13 @@ static void update_time() {
         time_ptr++;
     }
 
-    // Format date (day of week + day number)
-    char date_str[12];
-    strftime(date_str, sizeof(date_str), "%a %e", tick_time);
+    // Set time text
+    snprintf(s_time_buffer, sizeof(s_time_buffer), "%s", time_ptr);
+    text_layer_set_text(s_time_layer, s_time_buffer);
 
-    // Combine with two spaces between
-    snprintf(s_time_date_buffer, sizeof(s_time_date_buffer), "%s  %s", time_ptr, date_str);
-    text_layer_set_text(s_time_date_layer, s_time_date_buffer);
+    // Format and set date (day of week + day number)
+    strftime(s_date_buffer, sizeof(s_date_buffer), "%a %e", tick_time);
+    text_layer_set_text(s_date_layer, s_date_buffer);
 }
 
 /**
@@ -1161,19 +1234,19 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         hide_loading_show_data();
     }
 
-    // Read CGM value
+    // Read delta first (needed for centering calculation)
+    Tuple *delta_tuple = dict_find(iterator, KEY_CGM_DELTA);
+    if (delta_tuple) {
+        snprintf(s_delta_buffer, sizeof(s_delta_buffer), "%s", delta_tuple->value->cstring);
+        text_layer_set_text(s_delta_layer, s_delta_buffer);
+    }
+
+    // Read CGM value and update layout (uses delta width for centering)
     Tuple *cgm_value_tuple = dict_find(iterator, KEY_CGM_VALUE);
     if (cgm_value_tuple) {
         snprintf(s_cgm_value_buffer, sizeof(s_cgm_value_buffer), "%s", cgm_value_tuple->value->cstring);
         text_layer_set_text(s_cgm_value_layer, s_cgm_value_buffer);
         update_layout_for_cgm_text(s_cgm_value_buffer);
-    }
-
-    // Read delta
-    Tuple *delta_tuple = dict_find(iterator, KEY_CGM_DELTA);
-    if (delta_tuple) {
-        snprintf(s_delta_buffer, sizeof(s_delta_buffer), "%s", delta_tuple->value->cstring);
-        text_layer_set_text(s_delta_layer, s_delta_buffer);
     }
 
     // Read trend
@@ -1339,44 +1412,61 @@ static void main_window_load(Window *window) {
     // - Time ago - height ~20
     // - Chart - remaining space
 
-    // Time and date layer - single row at top, left-aligned
-    s_time_date_layer = create_text_layer(
-        GRect(8, -2, bounds.size.w - 8, 38),
-        fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+    // Time layer - medium numbers font, left-aligned
+    s_time_layer = create_text_layer(
+        GRect(8, TIME_ROW_Y, 100, 40),
+        fonts_get_system_font(FONT_KEY_BITHAM_34_MEDIUM_NUMBERS),
         GTextAlignmentLeft
     );
-    layer_add_child(window_layer, text_layer_get_layer(s_time_date_layer));
+    layer_add_child(window_layer, text_layer_get_layer(s_time_layer));
 
-    int cgmValueYPos = 30;
+    // Battery layer - top right corner
+    s_battery_layer = layer_create(GRect(bounds.size.w - 36, 4, 30, 22));
+    layer_set_update_proc(s_battery_layer, battery_layer_update_proc);
+    layer_add_child(window_layer, s_battery_layer);
 
-    // CGM value layer - large font for glucose reading
+    // Divider line between time/date and CGM value row
+    s_divider_layer = layer_create(GRect(0, DIVIDER_Y, bounds.size.w, 1));
+    layer_set_update_proc(s_divider_layer, divider_layer_update_proc);
+    layer_add_child(window_layer, s_divider_layer);
+
+
+    // CGM value layer - large font for glucose reading (position updated dynamically)
+    // Hidden initially until data arrives to avoid showing wrong position
     s_cgm_value_layer = create_text_layer(
-        GRect(6, cgmValueYPos, 140, 52),
+        GRect(6, CGM_ROW_Y, 140, 52),
         fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
         GTextAlignmentLeft
     );
     text_layer_set_text(s_cgm_value_layer, "");
+    layer_set_hidden(text_layer_get_layer(s_cgm_value_layer), true);
     layer_add_child(window_layer, text_layer_get_layer(s_cgm_value_layer));
 
-    s_trend_layer = bitmap_layer_create(GRect(108, cgmValueYPos + 15, 30, 30));
+    // Trend arrow (position updated dynamically)
+    // Hidden initially until data arrives
+    s_trend_layer = bitmap_layer_create(GRect(108, CGM_ROW_Y + 15, 30, 30));
     bitmap_layer_set_compositing_mode(s_trend_layer, GCompOpOr);
     bitmap_layer_set_alignment(s_trend_layer, GAlignCenter);
     const uint32_t *icons = s_reversed ? TREND_ICONS_BLACK : TREND_ICONS_WHITE;
     s_trend_bitmap = gbitmap_create_with_resource(icons[TREND_NONE]);
     bitmap_layer_set_bitmap(s_trend_layer, s_trend_bitmap);
+    layer_set_hidden(bitmap_layer_get_layer(s_trend_layer), true);
     layer_add_child(window_layer, bitmap_layer_get_layer(s_trend_layer));
 
+    // Delta layer (position updated dynamically)
+    // Hidden initially until data arrives
     s_delta_layer = create_text_layer(
-        GRect(140, cgmValueYPos + 14, 54, 28),
-        fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+        GRect(140, CGM_ROW_Y + 7, 60, 32),
+        fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
         GTextAlignmentLeft
     );
     text_layer_set_text(s_delta_layer, "");
+    layer_set_hidden(text_layer_get_layer(s_delta_layer), true);
     layer_add_child(window_layer, text_layer_get_layer(s_delta_layer));
 
     // "No Data" layer - shown when CGM data is 60+ minutes old, centered in CGM value area
     s_no_data_layer = create_text_layer(
-        GRect(0, cgmValueYPos + 12, bounds.size.w, 28),
+        GRect(0, CGM_ROW_Y + 12, bounds.size.w, 28),
         fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
         GTextAlignmentCenter
     );
@@ -1385,31 +1475,34 @@ static void main_window_load(Window *window) {
     layer_add_child(window_layer, text_layer_get_layer(s_no_data_layer));
 
     // Chart layer - below CGM value row, taller for larger screen
-    s_chart_layer = layer_create(GRect(0, 88, bounds.size.w, 100));
+    s_chart_layer = layer_create(GRect(0, CHART_Y, bounds.size.w, CHART_HEIGHT));
     layer_set_update_proc(s_chart_layer, chart_layer_update_proc);
     layer_add_child(window_layer, s_chart_layer);
 
     // Time ago layer - bottom of screen, right-aligned
     s_time_ago_layer = create_text_layer(
-        GRect(0, 196, bounds.size.w - 8, 28),
+        GRect(0, BOTTOM_ROW_Y, bounds.size.w - 8, 28),
         fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
         GTextAlignmentRight
     );
     text_layer_set_text(s_time_ago_layer, "---");
     layer_add_child(window_layer, text_layer_get_layer(s_time_ago_layer));
 
-    // Battery layer - bottom left corner
-    s_battery_layer = layer_create(GRect(6, 203, 30, 22));
-    layer_set_update_proc(s_battery_layer, battery_layer_update_proc);
-    layer_add_child(window_layer, s_battery_layer);
+    // Date layer - bottom left corner
+    s_date_layer = create_text_layer(
+        GRect(8, BOTTOM_ROW_Y, 80, 28),
+        fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+        GTextAlignmentLeft
+    );
+    layer_add_child(window_layer, text_layer_get_layer(s_date_layer));
 
-    // Sync spinner layer - to the right of battery icon
-    s_sync_layer = layer_create(GRect(38, 206, 16, 16));
+    // Sync spinner layer - bottom, to the right of date
+    s_sync_layer = layer_create(GRect(90, 206, 16, 16));
     layer_set_update_proc(s_sync_layer, sync_layer_update_proc);
     layer_add_child(window_layer, s_sync_layer);
 
     // Alert triangle layer - same position as sync layer (mutually exclusive visibility)
-    s_alert_layer = layer_create(GRect(37, 204, 20, 20));
+    s_alert_layer = layer_create(GRect(89, 204, 20, 20));
     layer_set_update_proc(s_alert_layer, alert_layer_update_proc);
     layer_set_hidden(s_alert_layer, true);  // Hidden by default
     layer_add_child(window_layer, s_alert_layer);
@@ -1462,7 +1555,8 @@ static void main_window_unload(Window *window) {
         s_sync_stop_timer = NULL;
     }
 
-    text_layer_destroy(s_time_date_layer);
+    text_layer_destroy(s_time_layer);
+    text_layer_destroy(s_date_layer);
     text_layer_destroy(s_cgm_value_layer);
     text_layer_destroy(s_delta_layer);
     text_layer_destroy(s_time_ago_layer);
@@ -1470,6 +1564,7 @@ static void main_window_unload(Window *window) {
     text_layer_destroy(s_no_data_layer);
     bitmap_layer_destroy(s_trend_layer);
     layer_destroy(s_chart_layer);
+    layer_destroy(s_divider_layer);
     layer_destroy(s_loading_layer);
     layer_destroy(s_battery_layer);
     layer_destroy(s_sync_layer);
@@ -1506,7 +1601,7 @@ static void init() {
     app_message_register_outbox_sent(outbox_sent_callback);
 
     // Open AppMessage with appropriate buffer sizes
-    // Inbox needs to hold chart history (24 values * ~8 chars each = ~192) plus other fields
+    // Inbox needs to hold chart history (26 values * ~8 chars each = ~208) plus other fields
     app_message_open(512, 64);
 }
 
