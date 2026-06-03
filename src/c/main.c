@@ -51,7 +51,7 @@
 #define TIME_ROW_Y         0
 #define DIVIDER_Y          44
 #define CGM_ROW_Y          52
-#define CGM_DELTA_Y_OFFSET 9
+#define CGM_DELTA_Y_OFFSET 8
 #define CHART_Y            108
 #define CHART_HEIGHT       95
 #define BOTTOM_ROW_Y       196
@@ -1085,7 +1085,7 @@ static void update_layout_for_cgm_text(const char *cgm_text) {
     }
 
     // Calculate total width: CGM + gap + trend(30) + gap + delta
-    int gap = 5;
+    int gap = 7;
     int trend_width = 30;
     int total_width = cgm_size.w + gap + trend_width;
     if (!hide_delta) {
@@ -1102,7 +1102,7 @@ static void update_layout_for_cgm_text(const char *cgm_text) {
     // Position trend arrow after CGM text
     int trend_x = start_x + cgm_size.w + gap;
     layer_set_frame(bitmap_layer_get_layer(s_trend_layer),
-                    GRect(trend_x, CGM_ROW_Y + 15, 30, 30));
+                    GRect(trend_x, CGM_ROW_Y + 12, 30, 30));
 
     // Position delta after trend
     int delta_x = trend_x + trend_width + gap;
@@ -1446,7 +1446,7 @@ static void main_window_load(Window *window) {
 
     // Trend arrow (position updated dynamically)
     // Hidden initially until data arrives
-    s_trend_layer = bitmap_layer_create(GRect(108, CGM_ROW_Y + 15, 30, 30));
+    s_trend_layer = bitmap_layer_create(GRect(108, CGM_ROW_Y + 12, 30, 30));
     bitmap_layer_set_compositing_mode(s_trend_layer, GCompOpOr);
     bitmap_layer_set_alignment(s_trend_layer, GAlignCenter);
     const uint32_t *icons = s_reversed ? TREND_ICONS_BLACK : TREND_ICONS_WHITE;
