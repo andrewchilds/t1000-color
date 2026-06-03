@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "sideload": "pebble clean && pebble build && pebble install --cloudpebble --logs",
-    "emu": "python3 scripts/inject-emu-settings.py && pebble build && pebble install --emulator emery --logs"
+    "emulator": "pebble wipe && python3 scripts/inject-emu-settings.py && pebble build && pebble install --emulator emery --logs"
   },
   "dependencies": {
     "pebble-clay": "^1.0.4"

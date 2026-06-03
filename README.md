@@ -1,12 +1,12 @@
-# T1000
+# T1000 Color
 
-A Pebble watchface that displays real-time Dexcom CGM glucose data and provides configurable High and Low Soon alerts. This is a port of the software written for the [custom T1D smartwatch project](https://andrewchilds.com/posts/building-a-t1d-smartwatch-from-scratch).
+A watchface for the Pebble Time 2 that displays real-time Dexcom CGM glucose data and provides configurable High and Low Soon alerts. This is a port of the software written for the [custom T1D smartwatch project](https://andrewchilds.com/posts/building-a-t1d-smartwatch-from-scratch).
 
-![Watch photo](resources/images/watch.jpg)
+![Watch photo](resources/images/pebble-time-2.jpg)
 
 ## Features
 
-![Screenshot](resources/images/screenshot.png) ![Screenshot Reversed](resources/images/screenshot-reversed.png)
+![Screenshot](resources/images/screenshot.jpg)
 
 - Current glucose value with trend arrow
 - Delta (rate of change)
@@ -40,6 +40,13 @@ Build and install locally:
 ```sh
 # pebble clean && pebble build && pebble install --cloudpebble --logs
 npm run sideload
+```
+
+Run in an emulator:
+
+```sh
+# pebble wipe && python3 scripts/inject-emu-settings.py && pebble build && pebble install --emulator emery --logs
+npm run emulator
 ```
 
 ## License
