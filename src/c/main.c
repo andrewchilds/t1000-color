@@ -264,6 +264,7 @@ static void loading_layer_update_proc(Layer *layer, GContext *ctx) {
 static void battery_layer_update_proc(Layer *layer, GContext *ctx) {
     GRect bounds = layer_get_bounds(layer);
     GColor fg_color = s_reversed ? GColorBlack : GColorWhite;
+    GColor faded_fg_color = s_reversed ? GColorDarkGray : GColorLightGray;
 
     // Battery icon dimensions
     int battery_width = 20;
@@ -274,11 +275,11 @@ static void battery_layer_update_proc(Layer *layer, GContext *ctx) {
     int y = (bounds.size.h - battery_height) / 2;
 
     // Draw battery outline (rounded corners)
-    graphics_context_set_stroke_color(ctx, fg_color);
+    graphics_context_set_stroke_color(ctx, faded_fg_color);
     graphics_draw_round_rect(ctx, GRect(x, y, battery_width, battery_height), 1);
 
     // Draw battery tip (positive terminal)
-    graphics_context_set_fill_color(ctx, fg_color);
+    graphics_context_set_fill_color(ctx, faded_fg_color);
     graphics_fill_rect(ctx, GRect(x + battery_width, y + (battery_height - tip_height) / 2, tip_width, tip_height), 0, GCornerNone);
 
     // Calculate fill width based on battery level (with 1px padding inside)
@@ -288,6 +289,7 @@ static void battery_layer_update_proc(Layer *layer, GContext *ctx) {
 
     // Draw fill
     if (fill_width > 0) {
+        graphics_context_set_fill_color(ctx, fg_color);
         graphics_fill_rect(ctx, GRect(x + fill_padding, y + fill_padding, fill_width, battery_height - (fill_padding * 2)), 0, GCornerNone);
     }
 
