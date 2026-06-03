@@ -1,0 +1,17 @@
+{
+	"accountName": "your-dexcom-username",
+	"password": "your-dexcom-password",
+	"server": "us",
+	"unit": "mgdl",
+	"reversed": false,
+	"lowThreshold": 70,
+	"highThreshold": 180,
+	"vibeLowSoonEnabled": false,
+	"vibeLowSoonThreshold": 80,
+	"vibeLowSoonRepeatMinutes": 30,
+	"vibeEnabled": false,
+	"vibeHighThreshold": 250,
+	"vibeDelayMinutes": 60,
+	"vibeRepeatMinutes": 60,
+	"saltieApiToken": "your-saltie-api-token"
+}
