@@ -1172,8 +1172,8 @@ static void update_time() {
     snprintf(s_time_buffer, sizeof(s_time_buffer), "%s", time_ptr);
     text_layer_set_text(s_time_layer, s_time_buffer);
 
-    // Format and set date (day of week + day number)
-    strftime(s_date_buffer, sizeof(s_date_buffer), "%a %e", tick_time);
+    // Format and set date (day of week + month + day number)
+    strftime(s_date_buffer, sizeof(s_date_buffer), "%a %b %e", tick_time);
     text_layer_set_text(s_date_layer, s_date_buffer);
 }
 
