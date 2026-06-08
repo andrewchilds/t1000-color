@@ -954,10 +954,22 @@ static void chart_layer_update_proc(Layer *layer, GContext *ctx) {
         graphics_context_set_fill_color(ctx, fg_color);
 #endif
 
-        // Draw filled circle for each point
-        // Most recent dot (i=0) uses full radius if within 10 minutes, others are 1px smaller
-        int radius = (i == 0 && total_minutes_ago < 10) ? CHART_DOT_RADIUS : CHART_DOT_RADIUS - 1;
-        graphics_fill_circle(ctx, GPoint(x, y), radius);
+        // Draw circle for each point
+        // Most recent dot (i=0) is drawn as a 2px border (no fill) if within 10 minutes
+        // Others are filled circles 1px smaller
+        if (i == 0 && total_minutes_ago < 10) {
+            // Current reading: draw as hollow circle with 2px border
+#ifdef PBL_COLOR
+            graphics_context_set_stroke_color(ctx, get_glucose_color(original_value));
+#else
+            graphics_context_set_stroke_color(ctx, fg_color);
+#endif
+            graphics_context_set_stroke_width(ctx, 2);
+            graphics_draw_circle(ctx, GPoint(x, y), CHART_DOT_RADIUS);
+        } else {
+            // Historical readings: filled circles
+            graphics_fill_circle(ctx, GPoint(x, y), CHART_DOT_RADIUS - 1);
+        }
     }
 
     // Draw meal markers
