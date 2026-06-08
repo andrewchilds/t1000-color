@@ -45,6 +45,12 @@
 #define CHART_Y_MAX       300
 #define CHART_DOT_RADIUS  4
 
+// Heart rate chart configuration
+#define HR_CHART_MAX_POINTS  26  // Match CGM points (5-min intervals)
+#define HR_Y_MIN             20
+#define HR_Y_MAX             160
+#define HR_SQUARE_SIZE       5   // 1px smaller than CGM dot diameter (2*4-1=7, so 5 for square)
+
 // Display layout constants for Pebble Time 2 (200x228)
 #define SCREEN_WIDTH       200
 #define SCREEN_HEIGHT      228
@@ -120,6 +126,12 @@ static int s_chart_count = 0;
 static int16_t s_meal_carbs[MAX_MEALS];
 static int16_t s_meal_minutes_ago[MAX_MEALS];
 static int s_meal_count = 0;
+
+// Heart rate data (interpolated to 5-min intervals)
+static int16_t s_hr_values[HR_CHART_MAX_POINTS];
+static int16_t s_hr_minutes_ago[HR_CHART_MAX_POINTS];
+static int s_hr_count = 0;
+static bool s_hr_available = false;
 
 // Current trend
 static uint8_t s_current_trend = TREND_NONE;
@@ -697,6 +709,78 @@ static void parse_meal_data(const char *meal_data) {
 }
 
 /**
+ * Fetch heart rate data from HealthService and interpolate to 5-minute intervals
+ * HR data comes in 1-minute intervals, we average values for 5-min points
+ *
+ * Uses heap allocation to fetch all data in one call for performance
+ */
+static void fetch_heart_rate_data(void) {
+    s_hr_count = 0;
+    s_hr_available = false;
+
+#if PBL_API_EXISTS(health_service_get_minute_history)
+    time_t now = time(NULL);
+
+    // Allocate buffer on heap to avoid stack overflow
+    // HealthMinuteData is ~8 bytes, 130 records = ~1KB
+    HealthMinuteData *minute_data = malloc(130 * sizeof(HealthMinuteData));
+    if (!minute_data) {
+        APP_LOG(APP_LOG_LEVEL_ERROR, "HR: malloc failed");
+        return;
+    }
+
+    // Fetch all 130 minutes in one call
+    time_t start_time = now - 130 * 60;
+    time_t end_time = now;
+    uint32_t num_records = health_service_get_minute_history(
+        minute_data, 130, &start_time, &end_time);
+
+    if (num_records == 0) {
+        free(minute_data);
+        return;
+    }
+
+    s_hr_available = true;
+
+    // Interpolate to 5-minute intervals
+    // Records are returned oldest-first, so index 0 = oldest
+    for (int slot = 0; slot < HR_CHART_MAX_POINTS && s_hr_count < HR_CHART_MAX_POINTS; slot++) {
+        int target_minutes_ago = slot * 5;  // 0, 5, 10, 15, ... 125
+
+        // Find records within ±2 minutes of target
+        int hr_sum = 0;
+        int hr_count = 0;
+        for (uint32_t i = 0; i < num_records; i++) {
+            // Record i corresponds to (num_records - 1 - i) minutes ago
+            int record_minutes_ago = (int)(num_records - 1 - i);
+
+            if (abs(record_minutes_ago - target_minutes_ago) <= 2) {
+                uint8_t bpm = minute_data[i].heart_rate_bpm;
+                // Filter out invalid values: 0 = no data, 255 = sensor error/no data
+                // Also filter physiologically impossible values (< 30 or > 220)
+                if (bpm > 30 && bpm < 220 && bpm != 255) {
+                    hr_sum += bpm;
+                    hr_count++;
+                }
+            }
+        }
+
+        if (hr_count > 0) {
+            int avg_hr = hr_sum / hr_count;
+            // Sanity check: HR should be in reasonable range
+            if (avg_hr >= HR_Y_MIN && avg_hr <= HR_Y_MAX) {
+                s_hr_values[s_hr_count] = (int16_t)avg_hr;
+                s_hr_minutes_ago[s_hr_count] = (int16_t)target_minutes_ago;
+                s_hr_count++;
+            }
+        }
+    }
+
+    free(minute_data);
+#endif
+}
+
+/**
  * Get color for a glucose value (color platforms only)
  * Returns red for low, orange for high, green for in-range
  */
@@ -798,16 +882,51 @@ static void chart_layer_update_proc(Layer *layer, GContext *ctx) {
     }
 #endif
 
-    // Draw dots for each data point
-    // Data comes in most-recent-first, so we plot right-to-left
-    // X position is based on actual timestamp, not array index
-
     // Calculate elapsed time since data was received to adjust positions
     int elapsed_minutes = 0;
     if (s_last_data_time > 0) {
         time_t now = time(NULL);
         elapsed_minutes = (int)((now - s_last_data_time) / 60);
     }
+
+    // Draw heart rate as connected line if available
+    // Draw these first so CGM dots appear on top
+    if (s_hr_available && s_hr_count > 0) {
+        graphics_context_set_stroke_color(ctx, GColorBabyBlueEyes);
+        graphics_context_set_stroke_width(ctx, 2);
+
+        int prev_x = -1, prev_y = -1;
+
+        for (int i = 0; i < s_hr_count; i++) {
+            int hr_value = s_hr_values[i];
+
+            // Clamp to HR range
+            if (hr_value < HR_Y_MIN) hr_value = HR_Y_MIN;
+            if (hr_value > HR_Y_MAX) hr_value = HR_Y_MAX;
+
+            // HR data is already at 5-min intervals (0, 5, 10, ...)
+            // Use the same X calculation as CGM dots for consistent alignment
+            int total_minutes_ago = s_hr_minutes_ago[i] + elapsed_minutes;
+            int pixel_offset = (total_minutes_ago * CHART_DOT_SPACING) / 5;
+            int x = bounds.origin.x + bounds.size.w - margin - 2 - pixel_offset;
+
+            // Calculate Y position using HR scale (separate from CGM scale)
+            int y = bounds.origin.y + margin + chart_height -
+                    ((hr_value - HR_Y_MIN) * chart_height / (HR_Y_MAX - HR_Y_MIN));
+
+            // Draw connecting line to previous point
+            if (prev_x >= 0) {
+                graphics_draw_line(ctx, GPoint(prev_x, prev_y), GPoint(x, y));
+            }
+
+            prev_x = x;
+            prev_y = y;
+        }
+    }
+
+    // Draw dots for each data point
+    // Data comes in most-recent-first, so we plot right-to-left
+    // X position is based on actual timestamp, not array index
 
     for (int i = 0; i < s_chart_count; i++) {
         int value = s_chart_values[i];
@@ -1185,7 +1304,9 @@ static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
     update_time_ago_display();
 
     // Redraw chart to shift dots based on elapsed time
+    // Refresh heart rate data every minute (cheap operation, keeps HR current)
     if (s_chart_layer) {
+        fetch_heart_rate_data();
         layer_mark_dirty(s_chart_layer);
     }
 
@@ -1269,6 +1390,8 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
     Tuple *history_tuple = dict_find(iterator, KEY_CGM_HISTORY);
     if (history_tuple) {
         parse_chart_history(history_tuple->value->cstring);
+        // Fetch latest heart rate data to overlay on chart
+        fetch_heart_rate_data();
         layer_mark_dirty(s_chart_layer);
     }
 
