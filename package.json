@@ -1,7 +1,7 @@
 {
   "name": "t1000-color",
   "author": "Andrew Childs",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Displays real-time Dexcom CGM glucose and Heart Rate data on a Pebble Time 2.",
   "license": "MIT",
   "repository": {

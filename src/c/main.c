@@ -892,7 +892,7 @@ static void chart_layer_update_proc(Layer *layer, GContext *ctx) {
     // Draw heart rate as connected line if available
     // Draw these first so CGM dots appear on top
     if (s_hr_available && s_hr_count > 0) {
-        graphics_context_set_stroke_color(ctx, GColorBabyBlueEyes);
+        graphics_context_set_stroke_color(ctx, GColorPurpureus);
         graphics_context_set_stroke_width(ctx, 2);
 
         int prev_x = -1, prev_y = -1;
@@ -918,6 +918,10 @@ static void chart_layer_update_proc(Layer *layer, GContext *ctx) {
             if (prev_x >= 0) {
                 graphics_draw_line(ctx, GPoint(prev_x, prev_y), GPoint(x, y));
             }
+
+            // Draw filled circle at data point
+            graphics_context_set_fill_color(ctx, GColorPurpureus);
+            graphics_fill_circle(ctx, GPoint(x, y), 2);
 
             prev_x = x;
             prev_y = y;
