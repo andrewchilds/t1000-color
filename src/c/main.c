@@ -1631,14 +1631,14 @@ static void main_window_load(Window *window) {
 
     // Date layer - bottom left corner
     s_date_layer = create_text_layer(
-        GRect(8, BOTTOM_ROW_Y, 80, 28),
+        GRect(8, BOTTOM_ROW_Y, 100, 28),
         fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
         GTextAlignmentLeft
     );
     layer_add_child(window_layer, text_layer_get_layer(s_date_layer));
 
     // Sync spinner layer - bottom, to the right of date
-    s_sync_layer = layer_create(GRect(90, 206, 16, 16));
+    s_sync_layer = layer_create(GRect(110, 206, 16, 16));
     layer_set_update_proc(s_sync_layer, sync_layer_update_proc);
     layer_add_child(window_layer, s_sync_layer);
 
